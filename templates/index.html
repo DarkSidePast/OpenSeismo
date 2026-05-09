@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Seismic Disaster Tracker v6 Stable</title>
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js"></script>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<style>
+:root{
+  --bg:#020611;--panel:rgba(3,10,24,.91);--line:rgba(0,175,255,.32);--text:#e8f7ff;
+  --muted:#9fb7cc;--blue:#55cfff;--ok:#65ffbe;--warn:#ffd66b;--bad:#ff6b7a;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body,#cesiumContainer{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:Segoe UI,Tahoma,sans-serif}
+#cesiumContainer{position:fixed;inset:0}
+.cesium-viewer-bottom,.cesium-credit-logoContainer,.cesium-credit-textContainer{display:none!important}
+.shell{position:fixed;inset:12px;pointer-events:none;z-index:5;display:grid;grid-template-columns:390px 1fr 390px;gap:12px}
+.panel{pointer-events:auto;background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:0 0 32px rgba(0,140,255,.17);backdrop-filter:blur(12px);padding:14px;overflow:auto;max-height:calc(100vh - 24px)}
+h1{font-size:18px;color:#80dbff;margin-bottom:6px}.sub{font-size:12px;color:var(--muted);line-height:1.35;margin-bottom:10px}
+h2{font-size:13px;color:#80dbff;margin:10px 0 7px;border-top:1px solid rgba(255,255,255,.09);padding-top:10px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.stat{background:rgba(255,255,255,.055);border-left:3px solid #00aaff;border-radius:10px;padding:9px}.num{font-size:20px;font-weight:800;color:#5ed0ff}.cap{font-size:11px;color:var(--muted)}
+button,select,input[type=text]{background:rgba(0,153,255,.13);border:1px solid rgba(0,153,255,.35);color:var(--text);border-radius:10px;padding:8px 9px;font-size:12px;cursor:pointer;margin:3px}
+button:hover,select:hover{background:rgba(0,153,255,.26)}select option{background:#07111f;color:var(--text)}
+input[type=range]{width:100%;accent-color:#00aaff}
+.checks{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:7px}.checks label{font-size:12px;background:rgba(255,255,255,.05);padding:8px;border-radius:10px}
+.list,.telemetry{font-family:Consolas,monospace;font-size:11px;color:#d8f6ff;background:rgba(0,0,0,.28);border-radius:10px;padding:8px;line-height:1.45;max-height:230px;overflow:auto}
+.item{border-bottom:1px solid rgba(255,255,255,.08);padding:6px 0}.item:last-child{border-bottom:0}
+.badge{display:inline-block;border-radius:999px;padding:2px 7px;font-size:10px;border:1px solid rgba(255,255,255,.18);margin-left:4px}
+.low{color:#91d7ff}.moderate{color:#ffd66b}.high{color:#ff9c4a}.very-high{color:#ff6b7a}.extreme{color:#fff;background:#090909;border-color:#fff}
+.footer{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);pointer-events:auto;background:rgba(3,10,24,.88);border:1px solid rgba(0,255,190,.24);border-radius:999px;padding:9px 13px;font-size:12px;color:#c8fff0;z-index:6}
+.right{grid-column:3}.center{grid-column:2;align-self:start;justify-self:center;max-width:520px}.topbar{pointer-events:auto;background:rgba(3,10,24,.78);border:1px solid rgba(0,175,255,.26);border-radius:999px;padding:9px 13px;font-size:12px;color:#c9eeff;text-align:center}
+.legend{display:flex;gap:7px;flex-wrap:wrap;font-size:11px;color:#bddfff;margin-top:7px}.lg{display:flex;gap:5px;align-items:center}.dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+.warn{font-size:11px;color:var(--warn);line-height:1.35;margin-top:7px}.err{color:#ff9d9d}.ok{color:var(--ok)}
+a{color:#80dbff}
+@media(max-width:1050px){.shell{grid-template-columns:1fr}.right,.center{grid-column:1}.right{display:none}.panel{max-height:50vh}.topbar{display:none}}
+</style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+
+<div class="shell">
+  <section class="panel">
+    <h1>🌍 Seismic Disaster Tracker v6</h1>
+    <div class="sub">Stable local safety dashboard: real USGS earthquakes, static/educational risk layers, simulated station telemetry.</div>
+    <div class="grid">
+      <div class="stat"><div class="num" id="quakeCount">0</div><div class="cap">Earthquakes</div></div>
+      <div class="stat"><div class="num" id="strongCount">0</div><div class="cap">M ≥ 5.0</div></div>
+      <div class="stat"><div class="num" id="stationCount">0</div><div class="cap">Stations</div></div>
+      <div class="stat"><div class="num" id="riskCount">0</div><div class="cap">Safety risks</div></div>
+    </div>
+
+    <h2>Controls</h2>
+    <label style="font-size:12px">Magnitude filter: <b id="magValue">0.0</b></label>
+    <input id="magFilter" type="range" min="0" max="8" step="0.1" value="0">
+    <div>
+      <button onclick="refreshAll()">🔄 Refresh</button>
+      <button onclick="resetView()">🎯 Reset</button>
+      <button onclick="toggleRotation()">🌀 Rotation</button>
+      <select onchange="setGlobeMode(this.value)">
+        <option value="safe">Safe dark globe</option>
+        <option value="osm">Try OSM tiles</option>
+      </select>
+    </div>
+
+    <h2>Layers</h2>
+    <div class="checks">
+      <label><input type="checkbox" id="showQuakes" checked> Earthquakes</label>
+      <label><input type="checkbox" id="showStations" checked> Stations</label>
+      <label><input type="checkbox" id="showWaves" checked> Waves</label>
+      <label><input type="checkbox" id="showVolcanoes" checked> Volcanoes</label>
+      <label><input type="checkbox" id="showFaults" checked> Fault nodes</label>
+      <label><input type="checkbox" id="showRisks" checked> Risk zones</label>
+      <label><input type="checkbox" id="showPlaces" checked> Places</label>
+    </div>
+
+    <div class="legend">
+      <span class="lg"><span class="dot" style="background:#28a7ff"></span>Weak</span>
+      <span class="lg"><span class="dot" style="background:#ffe45e"></span>Moderate</span>
+      <span class="lg"><span class="dot" style="background:#ff6b42"></span>Strong</span>
+      <span class="lg"><span class="dot" style="background:#050505;border:1px solid white"></span>Extreme</span>
+      <span class="lg"><span class="dot" style="background:#00ffd1"></span>Station</span>
+      <span class="lg"><span class="dot" style="background:#ff2ea6"></span>Volcano</span>
+      <span class="lg"><span class="dot" style="background:#36ff72"></span>Fault</span>
+      <span class="lg"><span class="dot" style="background:#ff8d3d"></span>Risk</span>
+    </div>
+    <div class="warn">Safe GPU Mode: no Cesium labels/glow polylines by default to avoid black-square and green-line rendering corruption.</div>
+
+    <h2>Selected object</h2>
+    <div id="telemetry" class="telemetry">Click any dot/ring on the globe.</div>
+  </section>
+
+  <div class="center">
+    <div class="topbar">Safe GPU globe · click dots for data · official alerts still beat this app</div>
+  </div>
+
+  <section class="panel right">
+    <h2>Priority safety summary</h2>
+    <div id="summaryList" class="list">Loading...</div>
+    <h2>Station telemetry</h2>
+    <div id="stationList" class="list">Loading...</div>
+    <h2>Fault classification</h2>
+    <div id="faultList" class="list">Loading...</div>
+  </section>
+</div>
+
+<div class="footer" id="statusText">Booting...</div>
+
+<script>
+let viewer, rotation=false, lastTick=Date.now();
+let quakeEntities=[], stationEntities=[], volcanoEntities=[], faultEntities=[], riskEntities=[], placeEntities=[], waveEntities=[];
+let activeWaveAnimations=[], selectedEventForWaves=null;
+
+const PLACES=[
+ ["Georgia",42.1,43.5,"country"],["Tbilisi",41.7151,44.8271,"city"],["Kutaisi",42.2679,42.6946,"city"],["Batumi",41.6168,41.6367,"city"],
+ ["Turkey",39,35,"country"],["Istanbul",41.0082,28.9784,"city"],["Ankara",39.9334,32.8597,"city"],["Greece",39,22,"country"],["Athens",37.9838,23.7275,"city"],
+ ["Japan",37.5,138,"country"],["Tokyo",35.6762,139.6503,"city"],["Sapporo",43.0618,141.3545,"city"],["Taipei",25.033,121.5654,"city"],
+ ["Indonesia",-2.5,118,"country"],["Jakarta",-6.2088,106.8456,"city"],["Chile",-30,-71,"country"],["Santiago",-33.4489,-70.6693,"city"],
+ ["USA",39.5,-98.35,"country"],["San Francisco",37.7749,-122.4194,"city"],["Los Angeles",34.0522,-118.2437,"city"],["Mexico City",19.4326,-99.1332,"city"],
+ ["Italy",42.8,12.5,"country"],["Rome",41.9028,12.4964,"city"],["New Zealand",-41,173,"country"],["Wellington",-41.2865,174.7762,"city"]
+];
+
+function status(msg,bad=false){document.getElementById("statusText").innerHTML=bad?`<span class="err">${msg}</span>`:msg;}
+function clearEntities(arr){arr.forEach(e=>{try{viewer.entities.remove(e)}catch(_){}});arr.length=0}
+function setVisible(arr,val){arr.forEach(e=>e.show=val)}
+function riskClass(level){return String(level||"low").toLowerCase().replace(" ","-")}
+function badge(level){return `<span class="badge ${riskClass(level)}">${level||"low"}</span>`}
+function colorForRisk(level){level=String(level||"low").toLowerCase();if(level==="extreme")return Cesium.Color.BLACK;if(level==="very high")return Cesium.Color.fromCssColorString("#ff4d6d");if(level==="high")return Cesium.Color.fromCssColorString("#ff8d3d");if(level==="moderate")return Cesium.Color.fromCssColorString("#ffd66b");return Cesium.Color.fromCssColorString("#28a7ff")}
+function colorForMag(m){if(m<3)return Cesium.Color.fromCssColorString("#28a7ff");if(m<5)return Cesium.Color.fromCssColorString("#ffe45e");if(m<7)return Cesium.Color.fromCssColorString("#ff6b42");return Cesium.Color.BLACK}
+function noiseColor(n){if(n<20)return Cesium.Color.fromCssColorString("#00ffd1");if(n<40)return Cesium.Color.fromCssColorString("#7dff5e");if(n<65)return Cesium.Color.fromCssColorString("#ffd45e");return Cesium.Color.fromCssColorString("#ff3d5e")}
+function fmt(v,d=2){let n=Number(v);return Number.isFinite(n)?n.toFixed(d):"N/A"}
+function fmtTime(ms){return ms?new Date(ms).toLocaleString():"Unknown"}
+async function fetchJson(url){const r=await fetch(url);if(!r.ok)throw new Error(`${url} failed ${r.status}`);return await r.json()}
+
+async function init(){
+ try{
+  Cesium.Ion.defaultAccessToken="";
+  viewer=new Cesium.Viewer("cesiumContainer",{
+    animation:false,timeline:false,fullscreenButton:false,geocoder:false,sceneModePicker:false,baseLayerPicker:false,homeButton:false,
+    navigationHelpButton:false,infoBox:false,selectionIndicator:false,terrainProvider:new Cesium.EllipsoidTerrainProvider(),imageryProvider:false,requestRenderMode:false
+  });
+  viewer.scene.globe.baseColor=Cesium.Color.fromCssColorString("#07111f");
+  viewer.scene.backgroundColor=Cesium.Color.BLACK;
+  viewer.scene.globe.enableLighting=false;
+  viewer.scene.globe.showGroundAtmosphere=false;
+  viewer.scene.skyAtmosphere.show=false;
+  viewer.scene.fog.enabled=false;
+  viewer.scene.postProcessStages.fxaa.enabled=false;
+  viewer.resolutionScale=0.55;
+  viewer.scene.screenSpaceCameraController.enableCollisionDetection=false;
+  viewer.scene.screenSpaceCameraController.minimumZoomDistance=1000000;
+  viewer.scene.screenSpaceCameraController.maximumZoomDistance=56000000;
+  viewer.camera.setView({destination:Cesium.Cartesian3.fromDegrees(44.8271,28,27000000),orientation:{heading:0,pitch:-Cesium.Math.PI_OVER_TWO,roll:0}});
+  viewer.clock.onTick.addEventListener(()=>{if(!rotation)return;const now=Date.now(),dt=(now-lastTick)/1000;lastTick=now;viewer.scene.camera.rotate(Cesium.Cartesian3.UNIT_Z,-0.002*dt)});
+  viewer.screenSpaceEventHandler.setInputAction((click)=>{
+    const picked=viewer.scene.pick(click.position);
+    if(Cesium.defined(picked)&&picked.id&&picked.id._telemetry){
+      document.getElementById("telemetry").innerHTML=picked.id._telemetry;
+      if(picked.id._eventData){selectedEventForWaves=picked.id._eventData;drawWaves(selectedEventForWaves)}
+    }
+  },Cesium.ScreenSpaceEventType.LEFT_CLICK);
+  wire(); addPlaces(); await refreshAll();
+ }catch(e){console.error(e);status("Boot failed: "+e.message,true)}
+}
+
+function setGlobeMode(mode){
+ viewer.imageryLayers.removeAll();
+ if(mode==="safe"){viewer.scene.globe.baseColor=Cesium.Color.fromCssColorString("#07111f");return}
+ try{viewer.imageryLayers.addImageryProvider(new Cesium.OpenStreetMapImageryProvider({url:"https://tile.openstreetmap.org/"}))}
+ catch(e){status("Tile map failed; safe globe remains active.",true)}
+}
+
+function wire(){
+ document.getElementById("magFilter").addEventListener("input",e=>document.getElementById("magValue").textContent=parseFloat(e.target.value).toFixed(1));
+ document.getElementById("magFilter").addEventListener("change",refreshQuakes);
+ [["showQuakes",quakeEntities],["showStations",stationEntities],["showVolcanoes",volcanoEntities],["showFaults",faultEntities],["showRisks",riskEntities],["showPlaces",placeEntities]].forEach(([id,arr])=>{
+   document.getElementById(id).addEventListener("change",e=>setVisible(arr,e.target.checked));
+ });
+ document.getElementById("showWaves").addEventListener("change",e=>{if(!e.target.checked)clearWaveAnimations();else if(selectedEventForWaves)drawWaves(selectedEventForWaves)});
+}
+
+function addPoint(lon,lat,height,size,color,outline,telemetry,arr,show=true){
+ const e=viewer.entities.add({position:Cesium.Cartesian3.fromDegrees(lon,lat,height),point:{pixelSize:size,color,outlineColor:outline||Cesium.Color.WHITE,outlineWidth:1,scaleByDistance:new Cesium.NearFarScalar(1.5e6,1.2,2.8e7,.35)},show});
+ e._telemetry=telemetry; arr.push(e); return e;
+}
+function addRing(lon,lat,radiusKm,color,telemetry,arr,show=true){
+ const e=viewer.entities.add({position:Cesium.Cartesian3.fromDegrees(lon,lat,3000),ellipse:{semiMajorAxis:radiusKm*1000,semiMinorAxis:radiusKm*1000,material:color.withAlpha(.08),outline:true,outlineColor:color.withAlpha(.55),height:3000},show});
+ e._telemetry=telemetry; arr.push(e); return e;
+}
+
+function addPlaces(){
+ clearEntities(placeEntities); const rows=[];
+ PLACES.forEach(([name,lat,lon,type])=>{
+   const isCity=type==="city", color=isCity?Cesium.Color.WHITE:Cesium.Color.fromCssColorString("#8ab7ff");
+   addPoint(lon,lat,isCity?85000:160000,isCity?5:7,color,Cesium.Color.BLACK,`<b>${name}</b><br>${isCity?"City":"Country"}<br>${fmt(lat,4)}, ${fmt(lon,4)}`,placeEntities,document.getElementById("showPlaces").checked);
+   rows.push(`<div class="item"><b>${name}</b> · ${type}<br>${fmt(lat,4)}, ${fmt(lon,4)}</div>`);
+ });
+}
+
+async function refreshAll(){
+ status("Loading data...");
+ await Promise.allSettled([refreshQuakes(),refreshStations(),refreshVolcanoes(),refreshFaults(),refreshRisks(),refreshSummary()]);
+ status("Live · refreshed "+new Date().toLocaleTimeString());
+}
+
+async function refreshQuakes(){
+ try{
+  const mag=parseFloat(document.getElementById("magFilter").value), data=await fetchJson(`/api/earthquakes?mag_filter=${mag}`);
+  clearEntities(quakeEntities); let strong=0;
+  (data.features||[]).forEach(f=>{
+    const p=f.properties||{}, c=f.geometry?.coordinates||[0,0,0], m=Number(p.mag||0), risk=p.risk_assessment||{};
+    if(m>=5)strong++;
+    const tel=`<b>Earthquake</b> ${badge(risk.level)}<br><b>M${fmt(m,1)}</b> · ${p.place||"Unknown"}<br>Time: ${fmtTime(p.time)}<br>Depth: ${fmt(c[2],1)} km<br>Coordinates: ${fmt(c[1],4)}, ${fmt(c[0],4)}<br>Felt: ${p.felt ?? "N/A"} · MMI: ${p.mmi ?? "N/A"} · CDI: ${p.cdi ?? "N/A"}<br>USGS alert: ${p.alert||"none"} · Status: ${p.status||"unknown"}<br>Risk score: ${risk.score ?? "N/A"}<br>${p.url?`<a href="${p.url}" target="_blank">USGS page</a>`:""}`;
+    const e=addPoint(c[0],c[1],70000,Math.max(6,Math.min(32,5+m*3)),colorForMag(m).withAlpha(.92),Cesium.Color.WHITE,tel,quakeEntities,document.getElementById("showQuakes").checked);
+    e._eventData={lat:c[1],lon:c[0],depth:c[2]||10,mag:m,place:p.place||"Unknown",time:p.time};
+  });
+  document.getElementById("quakeCount").textContent=data.features?.length||0; document.getElementById("strongCount").textContent=strong;
+  const biggest=(data.features||[]).slice().sort((a,b)=>(b.properties.mag||0)-(a.properties.mag||0))[0];
+  if(biggest){const c=biggest.geometry.coordinates,p=biggest.properties;selectedEventForWaves={lat:c[1],lon:c[0],depth:c[2]||10,mag:p.mag||0,place:p.place||"Unknown",time:p.time}}
+ }catch(e){console.error(e);status("Earthquake feed failed: "+e.message,true)}
+}
+
+async function refreshStations(){
+ try{
+  const data=await fetchJson("/api/stations"); clearEntities(stationEntities); let total=0, rows=[];
+  (data.stations||[]).forEach(s=>{
+    const noise=Number(s.noise_level||0); total+=noise;
+    const tel=`<b>${s.code}</b> · ${s.name}<br>Network: ${s.network}<br>Country: ${s.country}<br>Health: ${s.health}<br>Latency: ${s.latency_seconds}s<br>Noise: ${fmt(noise,1)}/100 · ${s.signal_quality}<br>Coverage: ${s.coverage_radius_km} km<br>${s.arrival?`Distance: ${s.arrival.distance_km} km (${s.arrival.distance_deg}°)<br>P: ${s.arrival.p_wave_seconds}s · S: ${s.arrival.s_wave_seconds}s · Surface: ${s.arrival.surface_wave_seconds}s`:"No linked M4.5+ event"}`;
+    addPoint(s.lon,s.lat,125000,Math.max(7,Math.min(22,6+noise/6)),noiseColor(noise).withAlpha(.95),Cesium.Color.WHITE,tel,stationEntities,document.getElementById("showStations").checked);
+    rows.push(`<div class="item"><b>${s.code}</b> ${s.name}<br>Noise ${fmt(noise,1)} · ${s.signal_quality} · ${s.health}<br>${s.arrival?`P ${s.arrival.p_wave_seconds}s / S ${s.arrival.s_wave_seconds}s`:"No linked event"}</div>`);
+  });
+  document.getElementById("stationCount").textContent=data.stations?.length||0;
+  document.getElementById("stationList").innerHTML=rows.join("")||"No stations.";
+ }catch(e){console.error(e);document.getElementById("stationList").innerHTML=`<span class="err">Station data failed: ${e.message}</span>`}
+}
+
+async function refreshVolcanoes(){
+ try{
+  const data=await fetchJson("/api/volcanoes"); clearEntities(volcanoEntities);
+  (data.volcanoes||[]).forEach(v=>addPoint(v.lon,v.lat,95000,11,Cesium.Color.fromCssColorString("#ff2ea6"),Cesium.Color.WHITE,`<b>Volcano</b><br>${v.name}<br>${v.region}<br>Status: ${v.status}<br>Elevation: ${v.elevation||"?"} m`,volcanoEntities,document.getElementById("showVolcanoes").checked));
+ }catch(e){console.error(e)}
+}
+
+async function refreshFaults(){
+ try{
+  const data=await fetchJson("/api/faults"); clearEntities(faultEntities); const rows=[];
+  (data.faults||[]).forEach(f=>{
+    rows.push(`<div class="item"><b>${f.name}</b> ${badge(f.risk_level)}<br>${f.type} · ${f.classification||""}<br>${(f.primary_hazards||[]).join(", ")}</div>`);
+    (f.points||[]).forEach((p,i)=>addPoint(p[1],p[0],65000,f.risk_level==="extreme"?7:5,colorForRisk(f.risk_level),Cesium.Color.WHITE,`<b>${f.name}</b> ${badge(f.risk_level)}<br>Type: ${f.type}<br>${f.classification||""}<br>Hazards: ${(f.primary_hazards||[]).join(", ")}<br>Exposure: ${f.exposure||"N/A"}<br>Preparedness: ${f.preparedness||"N/A"}<br>Point ${i+1}`,faultEntities,document.getElementById("showFaults").checked));
+  });
+  document.getElementById("faultList").innerHTML=rows.join("")||"No faults.";
+ }catch(e){console.error(e)}
+}
+
+async function refreshRisks(){
+ try{
+  const data=await fetchJson("/api/disaster-risks"); clearEntities(riskEntities);
+  (data.risks||[]).forEach(r=>{
+    const tel=`<b>${r.name}</b> ${badge(r.risk_level)}<br>Hazard: ${r.hazard}<br>Region: ${r.region}<br>Trigger: ${r.trigger}<br><br><b>Safety</b><br>${(r.safety||[]).map(x=>"• "+x).join("<br>")}`;
+    addRing(r.lon,r.lat,r.radius_km,colorForRisk(r.risk_level),tel,riskEntities,document.getElementById("showRisks").checked);
+    addPoint(r.lon,r.lat,110000,8,colorForRisk(r.risk_level),Cesium.Color.WHITE,tel,riskEntities,document.getElementById("showRisks").checked);
+  });
+  document.getElementById("riskCount").textContent=data.risks?.length||0;
+ }catch(e){console.error(e)}
+}
+
+async function refreshSummary(){
+ try{
+  const data=await fetchJson("/api/safety-summary");
+  document.getElementById("summaryList").innerHTML=(data.summary||[]).map(x=>`<div class="item"><b>${x.kind}</b> ${badge(x.risk_level)}<br>${x.name}<br>Score: ${x.score}<br>${(x.safety||[]).slice(0,2).map(s=>"• "+s).join("<br>")}</div>`).join("")||"No priority items.";
+ }catch(e){console.error(e);document.getElementById("summaryList").innerHTML=`<span class="err">Summary failed: ${e.message}</span>`}
+}
+
+function clearWaveAnimations(){activeWaveAnimations.forEach(a=>{try{viewer.clock.onTick.removeEventListener(a.listener)}catch(_){}});activeWaveAnimations=[];clearEntities(waveEntities)}
+function drawWaves(ev){
+ clearWaveAnimations(); if(!ev||!document.getElementById("showWaves").checked)return;
+ const mag=Math.max(1,ev.mag||4), maxRadius=Math.min(3000000,Math.max(450000,mag*360000)), start=performance.now(), duration=7500;
+ [["P",0,1.25,"#44aaff",9000],["S",1100,.78,"#ffde59",14000],["Surface",2100,.55,"#ff4d6d",19000]].forEach(([name,delay,speed,css,height])=>{
+  const color=Cesium.Color.fromCssColorString(css), entity=viewer.entities.add({position:Cesium.Cartesian3.fromDegrees(ev.lon,ev.lat,height),ellipse:{semiMajorAxis:1,semiMinorAxis:1,material:color.withAlpha(0),outline:true,outlineColor:color.withAlpha(0),height}});
+  waveEntities.push(entity);
+  const listener=()=>{const elapsed=performance.now()-start-delay;if(elapsed<0)return;const t=Math.min(elapsed/duration,1),ease=1-Math.pow(1-t,2),radius=Math.max(1,maxRadius*ease*speed),alpha=Math.max(0,.7*(1-t));entity.ellipse.semiMajorAxis=radius;entity.ellipse.semiMinorAxis=radius;entity.ellipse.outlineColor=color.withAlpha(alpha);entity.ellipse.material=color.withAlpha(alpha*.08);if(t>=1){try{viewer.clock.onTick.removeEventListener(listener)}catch(_){}try{viewer.entities.remove(entity)}catch(_){}waveEntities=waveEntities.filter(x=>x!==entity);activeWaveAnimations=activeWaveAnimations.filter(x=>x.listener!==listener)}};
+  viewer.clock.onTick.addEventListener(listener);activeWaveAnimations.push({listener,entity});
+ });
+}
+function resetView(){viewer.camera.flyTo({destination:Cesium.Cartesian3.fromDegrees(44.8271,28,27000000),orientation:{heading:0,pitch:-Cesium.Math.PI_OVER_TWO,roll:0},duration:1.1})}
+function toggleRotation(){rotation=!rotation;lastTick=Date.now()}
+window.addEventListener("load",init);
+</script>
+</body>
+</html>
